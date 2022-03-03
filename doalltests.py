@@ -6,9 +6,10 @@ import torch
 import mediapipe
 
 
+device = "cuda" if torch.cuda.is_available() else "cpu"
 
 model = Net()
-model.load_state_dict(torch.load(r"C:\Users\erik\OneDrive\Cross-Code\VSCode\PythonCode\Starting_Code\Machine Learning\pytorchlearning\Speed\saved_models\15-1ke5tv.pt", map_location=torch.device("cpu")))
+model.load_state_dict(torch.load(r"C:\Users\erik\OneDrive\Cross-Code\VSCode\PythonCode\Starting_Code\Machine Learning\pytorchlearning\Speed\Adam15-2ke5tvnp.pt", map_location=device))
 model.eval()
 
 mpPose = mediapipe.solutions.pose
@@ -20,7 +21,7 @@ def getPose(img):
 
     results = pose.process(imgRGB).pose_landmarks.landmark
 
-    landmarks = [results[15],results[16],results[30],results[31]] + [results[x] for x in range(23,26)]
+    landmarks = [results[15],results[16],results[32],results[31]] + [results[x] for x in range(23,27)]
 
     inputs = [x.x for x in landmarks] + [x.y for x in landmarks] + [x.z for x in landmarks]
 

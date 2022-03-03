@@ -9,7 +9,7 @@ import mediapipe
 import time
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
-num_epochs = 1000
+num_epochs = 2000
 
 class SpeedDataset(tud.Dataset):
 
@@ -73,7 +73,7 @@ class SpeedDataset(tud.Dataset):
         imgRGB = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         results = self.pose.process(imgRGB).pose_landmarks.landmark
 
-        landmarks = [results[15],results[16],results[30],results[31]] + [results[x] for x in range(23,26)]
+        landmarks = [results[15],results[16],results[32],results[31]] + [results[x] for x in range(23,27)]
 
         return landmarks
     
@@ -85,7 +85,7 @@ class Net(nn.Module):
         self.network = nn.Sequential(
             nn.Linear(21, 15), #Did 12 12 12 12, trying 17 17 12 12 
             nn.ReLU(),
-            #nn.Linear(12,12),
+            #nn.Linear(15,15),
             #nn.ReLU(),
             nn.Linear(15,2)
         )
@@ -138,7 +138,7 @@ def main():
     testloader = tud.DataLoader(testdata, batch_size=8, shuffle=True)
 
     model = Net().to(device)
-    optimizer = torch.optim.SGD(model.parameters(), lr=.001)
+    optimizer = torch.optim.Adam(model.parameters(), lr=.0001)
     loss_fn = nn.CrossEntropyLoss()
 
     for i in range(num_epochs):
@@ -147,7 +147,7 @@ def main():
             print(f"Epoch {i:>3d}/{num_epochs:>3d}---------------")
         trainloop(trainloader, model, optimizer, loss_fn, False)
         testloop(testloader, model, loss_fn, verbose)
-    torch.save(model.state_dict(), "15-1ke5tv.pt")
+    torch.save(model.state_dict(), "Adam15-2ke5tvnp.pt")
 
 
 
