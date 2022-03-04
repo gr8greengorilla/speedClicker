@@ -2,13 +2,13 @@ import cv2
 from trainnet import Net
 import torch
 import mediapipe
-
+import numpy as np
 
 
 class Clicker():
     def __init__(self) -> None:
         self.model = Net()
-        self.model.load_state_dict(torch.load(r"C:\Users\erik\OneDrive\Cross-Code\VSCode\PythonCode\Starting_Code\Machine Learning\pytorchlearning\Speed\saved_models\15-1ke5tv.pt", map_location=torch.device("cpu")))
+        self.model.load_state_dict(torch.load(r"saved_models\SGD100e001lr40.pt", map_location=torch.device("cpu")))
         self.model.eval()
 
         self.mpPose = mediapipe.solutions.pose
@@ -20,39 +20,60 @@ class Clicker():
 
         results = self.pose.process(imgRGB).pose_landmarks.landmark
 
-        landmarks = [results[15],results[16],results[30],results[31]] + [results[x] for x in range(23,26)]
+        #landmarks = [results[15],results[16],results[30],results[31]] + [results[x] for x in range(23,26)]
 
-        inputs = [x.x for x in landmarks] + [x.y for x in landmarks] + [x.z for x in landmarks]
+        inputs = [[x.x,x.y,x.z] for x in results]
 
         return inputs
 
-    def getScore(self, frames):
-        print("Processing new set of frames...")
+    def getScore(self, path, n=2):
         self.pose = self.mpPose.Pose()
-        inputs = []
+
+        vidcap = cv2.VideoCapture(path)
+        success,image = vidcap.read()
+
+        vdata = []
+
         count = 0
-        for i in frames:
-            print(f"Frame {count}...", end="\r")
-            try:
-                inputs.append(self.getPose(i))
-            except:
-                print(f"Failed to make landmarks for frame {count}")
-            
+        while success:
+            print(f"Frame {count:4d}", end="\r")
             count += 1
+            try:
+                vdata.append(self.getPose(image))
+            except:
+                print(f"Failed to create landmarks on frame {count:4d}")
+            success,image = vidcap.read()
 
-        inputs = torch.Tensor(inputs)
-        clicks = [self.model(x).argmax(0).item() for x in inputs]
+                
 
-        output = []
-        for i in range(len(clicks)-1):
-            if clicks[i] != clicks[i+1]:
-                output.append(clicks[i])
-        if clicks[-1] != clicks[-2]:
-            output.append(clicks[-1])
-        sum = 0
-        for i in output:
-            if i == 1:
-                sum += 1
-        
-        print(f"Scored {sum}            ")
-        return sum
+        vdata = np.array(vdata)
+        vdata = vdata[:,[15,16,23,24,25,26,31,32],:] #900 Maxes the amount of frames per video, [15,16...] selects the landmarks wanted to use
+        totaldata = []
+        for j in range(n, len(vdata)-n):
+            slice = vdata[j-n:j+n]     
+            totaldata.append(slice)
+
+        totaldata = np.array(totaldata)
+        totaldata = totaldata.reshape([totaldata.shape[0],-1])
+
+        outputs = [self.model(torch.tensor(x)).argmax().item() for x in totaldata]
+
+        clicks = []
+        for i in range(len(outputs)-1):
+            if outputs[i] != outputs[i+1]:
+                clicks.append(outputs[i])
+        if outputs[-1] != outputs[-2]:
+            clicks.append(outputs[-1])
+
+        score = clicks.count(1)
+
+        return score
+
+
+thing = Clicker()
+
+scores = []
+for i in range(1,8):
+    print(f"Working on Video {i}")
+    scores.append(thing.getScore(f"tests/test{i}.mp4"))
+print(scores)

@@ -7,75 +7,64 @@ from PIL import Image
 import cv2
 import mediapipe
 import time
+import numpy as np
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
-num_epochs = 2000
+num_epochs = 100
 
 class SpeedDataset(tud.Dataset):
 
-    def __init__(self, path, pddata, transform=None, train=True, split=.20):
+    def __init__(self, path, pddata, transform=None, train=True, n=2):
         self.path = path + "/"
         self.transform = transform
         self.data = pddata
-        #self.data = self.data.sample(frac = 1)
         if train:
-            self.data = self.data.iloc[int(len(self.data) * split):]
+            self.data = self.data.iloc[[0,1,2,3,4]]
         else:
-            self.data = self.data.iloc[:int(len(self.data) * split)]
+            self.data = self.data.iloc[[5]]
+        self.data = self.data.reset_index()
 
-        self.mpPose = mediapipe.solutions.pose
-        self.pose = self.mpPose.Pose()
+        self.totaldata = []
+        self.totalcategorical = []
+        for i in range(len(self.data)):
+            vdata = np.load(self.data.at[i, "pdatapath"])
+            vdata = vdata[:,[15,16,23,24,25,26,31,32],:] #900 Maxes the amount of frames per video, [15,16...] selects the landmarks wanted to use
 
-        self.poses = []
-        todrop = []
-        for i in range(0,len(self.data)):
-            print(f"Processing frames: {i:>5d}/{len(self.data):>5d}", end="\r")
-            fname = self.path + self.data.iloc[i, 0]
-            trylimit = 0
-            while True:
-                try:
-                    landmarks = self.getPose(fname)
-                    input = [x.x for x in landmarks] + [x.y for x in landmarks] + [x.z for x in landmarks]
 
-                    self.poses.append(input)
-                    break
-                except:
-                    trylimit += 1
-                    if trylimit == 5:
-                        print(f"{i} Failed to make landmarks for " + fname)
-                        todrop.append(i)
-                        break
-                        
+            cdata = np.load(self.data.at[i, "cdatapath"])
+            for j in range(n, len(vdata)-n):
+                slice = vdata[j-n:j+n]
 
-        if todrop:
-            todrop.reverse()
-            self.data.drop([self.data.index[x] for x in todrop], inplace=True)
+                if 1 in cdata[j-n:j+n]:
+                    self.totalcategorical.append(1)
+                else:
+                    self.totalcategorical.append(0)
+
+                
+                self.totaldata.append(slice)
+
+        self.totalcategorical = np.array(self.totalcategorical)
+        self.totaldata = np.array(self.totaldata)
+        self.totaldata = self.totaldata.reshape([self.totaldata.shape[0],-1])
                 
 
     def __len__(self):
-        return len(self.data)
+        return len(self.totalcategorical)
 
     def __getitem__(self, idx):
         if torch.is_tensor(idx):
             idx = idx.tolist()
-
-        category = self.data.iloc[idx, 1]
-        sample = (torch.Tensor(self.poses[idx]), torch.tensor(category, dtype=torch.long))
+        
+        #print(self.totaldata[idx])
+        #sample = torch.Tensor(self.totaldata[idx]), torch.tensor(self.totalcategorical[idx], dtype=torch.long)
+        category = torch.tensor(self.totalcategorical[idx])
+        data = torch.tensor(self.totaldata[idx])
+        sample = (data, category)
 
         if self.transform:
             sample[0] = self.transform(sample[0])
-
+        
         return sample
-    
-    def getPose(self, pathToImg):
-        img = cv2.imread(pathToImg)
-
-        imgRGB = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        results = self.pose.process(imgRGB).pose_landmarks.landmark
-
-        landmarks = [results[15],results[16],results[32],results[31]] + [results[x] for x in range(23,27)]
-
-        return landmarks
     
 
 class Net(nn.Module):
@@ -83,24 +72,32 @@ class Net(nn.Module):
         super(Net, self).__init__()
         self.flatten = nn.Flatten()
         self.network = nn.Sequential(
-            nn.Linear(21, 15), #Did 12 12 12 12, trying 17 17 12 12 
+            nn.Linear(96, 40), #Did 12 12 12 12, trying 17 17 12 12 
             nn.ReLU(),
-            #nn.Linear(15,15),
-            #nn.ReLU(),
-            nn.Linear(15,2)
+            nn.Linear(40,2)
         )
         
     
     def forward(self, x):
-        x = self.network(x)
+        #x = x.view(-1)
+        #print(x.size())
+        #print(x)
+        x = self.network(x.float())
         return x
 
 
 def trainloop(dataloader, model, optimizer, loss_fn, verbose=True):
     size = len(dataloader.dataset)
+    #print(f"{len(dataloader)}, Dataldoaer size")
     for batch, (X,y) in enumerate(dataloader):
+        y = torch.tensor([1]).long() if 1 in y else torch.tensor([0]).long()
         X, y = X.to(device), y.to(device)
+    
+        #print(X.size())
+
         pred = model(X)
+        #print(pred.size())
+
         loss = loss_fn(pred, y)
 
         optimizer.zero_grad()
@@ -114,31 +111,34 @@ def testloop(dataloader, model, loss_fn, verbose=True):
     totalloss, ncorrect = 0, 0
     num_batches = len(dataloader)
     size = len(dataloader.dataset)
-    for X, y in dataloader:
-        X, y = X.to(device), y.to(device)
-        pred = model(X)
+    with torch.no_grad():
+        for X, y in dataloader:
+            y = torch.tensor([1]).long() if 1 in y else torch.tensor([0]).long()
+            X, y = X.to(device), y.to(device)
+            pred = model(X)
 
-        totalloss += loss_fn(pred, y).item()
-        ncorrect += (y == pred.argmax(1)).type(torch.float).sum().item()
-    
-    if verbose:
-        ncorrect /= size
-        totalloss /= num_batches
-        print(f"Accuracy: {ncorrect * 100:>2f}%, Avg loss = {totalloss:5f}")
+            totalloss += loss_fn(pred, y).item()
+            ncorrect += (y == pred.argmax(1)).type(torch.float).sum().item()
+
+        if verbose:
+            ncorrect /= size
+            totalloss /= num_batches
+            print(f"Accuracy: {ncorrect * 100:>2f}%, Avg loss = {totalloss:5f}")
 
 def main():
 
     path = "C:/Users/erik/OneDrive/Cross-Code/VSCode/PythonCode/Starting_Code/Machine Learning/pytorchlearning/Speed"
-    pddata = pd.read_csv("datalabels.csv").sample(frac=1)
+    pddata = pd.read_csv("datalabels.csv")
+    pddata = pddata.head(6)
     testdata = SpeedDataset(path, pddata, train=False)
     traindata = SpeedDataset(path, pddata, train=True)
     
 
-    trainloader = tud.DataLoader(traindata, batch_size=8, shuffle=True)
-    testloader = tud.DataLoader(testdata, batch_size=8, shuffle=True)
+    trainloader = tud.DataLoader(traindata, batch_size=1, shuffle=False)
+    testloader = tud.DataLoader(testdata, batch_size=1, shuffle=False)
 
     model = Net().to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=.0001)
+    optimizer = torch.optim.SGD(model.parameters(), lr=.001)
     loss_fn = nn.CrossEntropyLoss()
 
     for i in range(num_epochs):
@@ -146,8 +146,8 @@ def main():
         if verbose:
             print(f"Epoch {i:>3d}/{num_epochs:>3d}---------------")
         trainloop(trainloader, model, optimizer, loss_fn, False)
-        testloop(testloader, model, loss_fn, verbose)
-    torch.save(model.state_dict(), "Adam15-2ke5tvnp.pt")
+        #testloop(testloader, model, loss_fn, verbose)
+    torch.save(model.state_dict(), f"saved_models/SGD100e001lr.pt")
 
 
 
