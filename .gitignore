@@ -1,0 +1,5 @@
+sound/
+frames/
+backup/
+__pycache__
+saved_models/performace.xlsx
