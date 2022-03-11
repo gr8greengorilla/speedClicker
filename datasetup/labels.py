@@ -22,7 +22,7 @@ categories = []
 df = pd.read_csv(r"C:\Users\erik\OneDrive\Cross-Code\VSCode\PythonCode\Starting_Code\Machine Learning\pytorchlearning\Speed\datalabels.csv")
 i = 0
 
-path = df.at[5, "videopath"]
+path = df.at[20, "videopath"]
 print(path)
 vidcap = cv2.VideoCapture(path)
 success,image = vidcap.read()
@@ -33,7 +33,7 @@ while success:
     count += 1
     #try:
     cv2.namedWindow("output", cv2.WINDOW_NORMAL)
-    imS = cv2.resize(image, (1500, 1500))
+    imS = cv2.resize(image, (900, 900))
     cv2.imshow("frame", imS)
 
     try:
@@ -45,14 +45,14 @@ while success:
             #np.append([getPose(image), 0], labels)
             labels.append([landmarkdata])
             categories.append(0)
+            success,image = vidcap.read()
         elif k == "a":
             #np.append(labels, np.array([getPose(image), 1],dtype=object))
             labels.append([landmarkdata])
             categories.append(1)
+            success,image = vidcap.read()
         elif k == "m":
             break
-        
-        success,image = vidcap.read()
 
 
     except:
@@ -61,7 +61,7 @@ while success:
     
     #except:
     #    break
-output = np.array(labels)
+output = np.array(labels)[:,0,:,:]
 categories = np.array(categories)
 print(categories)
 np.save("/".join(path.split("/")[0:-1]) + "/posedata", output)

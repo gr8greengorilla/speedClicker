@@ -1,15 +1,19 @@
+from operator import mod
 import cv2
-from trainnet import Net
 import torch
 import mediapipe
 import numpy as np
-
+from trainnet import Net
 
 class Clicker():
-    def __init__(self) -> None:
-        self.model = Net()
-        self.model.load_state_dict(torch.load(r"saved_models\SGD100e001lr40.pt", map_location=torch.device("cpu")))
-        self.model.eval()
+    def __init__(self, model=None) -> None:
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        if not model:
+            self.model = Net()
+            self.model.load_state_dict(torch.load(r"C:\Users\erik\OneDrive\Cross-Code\VSCode\PythonCode\Starting_Code\Machine Learning\pytorchlearning\Speed\saved_models\MostRecent.pt", map_location=torch.device(self.device)))
+            self.model.eval()
+        else:
+            self.model = model
 
         self.mpPose = mediapipe.solutions.pose
         
@@ -20,13 +24,40 @@ class Clicker():
 
         results = self.pose.process(imgRGB).pose_landmarks.landmark
 
-        #landmarks = [results[15],results[16],results[30],results[31]] + [results[x] for x in range(23,26)]
-
         inputs = [[x.x,x.y,x.z] for x in results]
 
         return inputs
+    
+    def setModel(self, model):
+        self.model = model
 
-    def getScore(self, path, n=2):
+    def getScore(self, vdata, n=1):
+        vdata = vdata[:,[15,16,23,24,25,26,31,32],:] #900 Maxes the amount of frames per video, [15,16...] selects the landmarks wanted to use
+        totaldata = []
+        for j in range(n, len(vdata)-n):
+            slice = vdata[j-n:j+n+1]     
+            totaldata.append(slice)
+
+        totaldata = np.array(totaldata)
+        totaldata = totaldata.reshape([totaldata.shape[0],-1])
+
+        with torch.no_grad():
+            self.model = self.model.to(self.device)
+            with torch.no_grad():
+                outputs = [self.model(torch.tensor(x).to(self.device)).argmax().item() for x in totaldata]
+
+        clicks = []
+        for i in range(len(outputs)-1):
+            if outputs[i] != outputs[i+1]:
+                clicks.append(outputs[i])
+        if outputs[-1] != outputs[-2]:
+            clicks.append(outputs[-1])
+
+        score = clicks.count(1)
+
+        return score
+    
+    def labelVideo(self, path):
         self.pose = self.mpPose.Pose()
 
         vidcap = cv2.VideoCapture(path)
@@ -47,33 +78,17 @@ class Clicker():
                 
 
         vdata = np.array(vdata)
-        vdata = vdata[:,[15,16,23,24,25,26,31,32],:] #900 Maxes the amount of frames per video, [15,16...] selects the landmarks wanted to use
-        totaldata = []
-        for j in range(n, len(vdata)-n):
-            slice = vdata[j-n:j+n]     
-            totaldata.append(slice)
-
-        totaldata = np.array(totaldata)
-        totaldata = totaldata.reshape([totaldata.shape[0],-1])
-
-        outputs = [self.model(torch.tensor(x)).argmax().item() for x in totaldata]
-
-        clicks = []
-        for i in range(len(outputs)-1):
-            if outputs[i] != outputs[i+1]:
-                clicks.append(outputs[i])
-        if outputs[-1] != outputs[-2]:
-            clicks.append(outputs[-1])
-
-        score = clicks.count(1)
-
-        return score
+        return vdata
 
 
-thing = Clicker()
+def main():
+    thing = Clicker()
 
-scores = []
-for i in range(1,8):
-    print(f"Working on Video {i}")
-    scores.append(thing.getScore(f"tests/test{i}.mp4"))
-print(scores)
+    scores = []
+    for i in range(1,9):
+        data = np.load(f"tests/test{i}.npy")
+        scores.append(thing.getScore(data))
+    print(scores)
+
+if __name__ == "__main__":
+    main()
